@@ -31,10 +31,17 @@ const cropSvg         = $('cropSvg');
 const retakeBtn       = $('retakeBtn');
 const autoDetectBtn   = $('autoDetectBtn');
 const confirmCropBtn  = $('confirmCropBtn');
+const rotateCcwBtn    = $('rotateCcwBtn');
+const rotateCwBtn     = $('rotateCwBtn');
+const flipHBtn        = $('flipHBtn');
 const filmstrip       = $('filmstrip');
 const filmstripEmpty  = $('filmstripEmpty');
 const pageCount       = $('pageCount');
 const processPanel    = $('processPanel');
+const ocrChoice       = $('ocrChoice');
+const ocrYesBtn       = $('ocrYesBtn');
+const ocrNoBtn        = $('ocrNoBtn');
+const scanWindow      = $('scanWindow');
 const processCanvas   = $('processCanvas');
 const stageList       = $('stageList');
 const downloadBtn     = $('downloadBtn');
@@ -127,8 +134,24 @@ shutterBtn.addEventListener('click', () => {
   const vw = video.videoWidth, vh = video.videoHeight;
   if (!vw) return;
   const c = document.createElement('canvas');
-  c.width = vw; c.height = vh;
-  c.getContext('2d').drawImage(video, 0, 0, vw, vh);
+
+  // 一部端末(特にiOS Safari)では、カメラセンサーは横向きのフレームを渡す一方で
+  // 画面表示だけ縦に回転させていることがある。その場合そのままdrawImageすると
+  // 撮影結果が90度回転した状態になるため、画面が縦向きなのにセンサーが横向き
+  // (vw > vh)の組み合わせを検知して自動的に回転補正する。
+  const displayIsPortrait = window.matchMedia('(orientation: portrait)').matches;
+  const sensorIsLandscape = vw > vh;
+  if (displayIsPortrait && sensorIsLandscape) {
+    c.width = vh; c.height = vw;
+    const ctx = c.getContext('2d');
+    ctx.translate(c.width, 0);
+    ctx.rotate(Math.PI / 2);
+    ctx.drawImage(video, 0, 0, vw, vh);
+  } else {
+    c.width = vw; c.height = vh;
+    c.getContext('2d').drawImage(video, 0, 0, vw, vh);
+  }
+
   state.cropSrcCanvas = c;
   openCropStage(c);
 });
@@ -297,6 +320,37 @@ retakeBtn.addEventListener('click', () => {
   viewfinderSection.classList.remove('hidden');
 });
 
+/* ---- 回転・左右反転(鏡文字/横向きの補正) ---- */
+function transformCanvas(srcCanvas, type){
+  const c = document.createElement('canvas');
+  const ctx = c.getContext('2d');
+  if (type === 'flipH') {
+    c.width = srcCanvas.width; c.height = srcCanvas.height;
+    ctx.translate(c.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(srcCanvas, 0, 0);
+  } else if (type === 'rotateCW') {
+    c.width = srcCanvas.height; c.height = srcCanvas.width;
+    ctx.translate(c.width, 0);
+    ctx.rotate(Math.PI / 2);
+    ctx.drawImage(srcCanvas, 0, 0);
+  } else if (type === 'rotateCCW') {
+    c.width = srcCanvas.height; c.height = srcCanvas.width;
+    ctx.translate(0, c.height);
+    ctx.rotate(-Math.PI / 2);
+    ctx.drawImage(srcCanvas, 0, 0);
+  }
+  return c;
+}
+
+function applyTransform(type){
+  state.cropSrcCanvas = transformCanvas(state.cropSrcCanvas, type);
+  openCropStage(state.cropSrcCanvas);
+}
+rotateCcwBtn.addEventListener('click', () => applyTransform('rotateCCW'));
+rotateCwBtn.addEventListener('click', () => applyTransform('rotateCW'));
+flipHBtn.addEventListener('click', () => applyTransform('flipH'));
+
 /* ---- 透視変換(斜め補正/指の写り込み除去) ---- */
 confirmCropBtn.addEventListener('click', () => {
   if (!state.cvReady) { updateEngineBanner(); return; }
@@ -444,19 +498,46 @@ function enhanceContrast(canvas){
 }
 
 /* ============================================================
-   OCR (Tesseract.js, 日本語+英語)
+   OCR (Tesseract.js, 日本語)
+   速度優先のため既定は日本語のみ。英数字混在の書類が多い場合は
+   下の 'jpn' を 'jpn+eng' に変更すると精度は上がるが低速になる。
    ============================================================ */
 let tesseractWorker = null;
 async function getWorker(){
   if (tesseractWorker) return tesseractWorker;
-  tesseractWorker = await Tesseract.createWorker('jpn+eng');
+  tesseractWorker = await Tesseract.createWorker('jpn');
   return tesseractWorker;
+}
+
+// OCRは画素数が多いほど時間がかかるため、認識専用に縮小したコピーを作る
+// (PDFに使う画像本体は元解像度のまま別途保持しているので画質には影響しない)
+const OCR_MAX_DIMENSION = 1600;
+function downscaleForOcr(canvas){
+  const longSide = Math.max(canvas.width, canvas.height);
+  if (longSide <= OCR_MAX_DIMENSION) return canvas;
+  const scale = OCR_MAX_DIMENSION / longSide;
+  const c = document.createElement('canvas');
+  c.width = Math.round(canvas.width * scale);
+  c.height = Math.round(canvas.height * scale);
+  c.getContext('2d').drawImage(canvas, 0, 0, c.width, c.height);
+  return c;
 }
 
 async function runOCR(canvas){
   const worker = await getWorker();
-  const { data } = await worker.recognize(canvas);
-  return data;
+  const ocrInput = downscaleForOcr(canvas);
+  const { data } = await worker.recognize(ocrInput);
+  // 縮小画像で認識した座標を、PDFに使う元解像度の座標系に変換し直す
+  const scaleX = canvas.width / ocrInput.width;
+  const scaleY = canvas.height / ocrInput.height;
+  const words = (data.words || []).map(w => ({
+    text: w.text,
+    bbox: {
+      x0: w.bbox.x0 * scaleX, y0: w.bbox.y0 * scaleY,
+      x1: w.bbox.x1 * scaleX, y1: w.bbox.y1 * scaleY
+    }
+  }));
+  return { text: data.text, words };
 }
 
 /* ============================================================
@@ -503,16 +584,29 @@ async function buildPDF(){
 /* ============================================================
    処理パイプライン(影除去 → コントラスト → OCR → PDF)
    ============================================================ */
-doneBtn.addEventListener('click', async () => {
+doneBtn.addEventListener('click', () => {
   if (state.pages.length === 0) { setStatus('先に撮影してください', 'warn'); return; }
   processPanel.classList.remove('hidden');
+  ocrChoice.classList.remove('hidden');
+  scanWindow.classList.add('hidden');
+  stageList.classList.add('hidden');
+  downloadBtn.classList.add('hidden');
+  closeProcessBtn.classList.add('hidden');
+});
+
+async function startPipeline(withOcr){
+  ocrChoice.classList.add('hidden');
+  scanWindow.classList.remove('hidden');
+  stageList.classList.remove('hidden');
   try {
-    await runPipeline();
+    await runPipeline(withOcr);
   } catch (e) {
     console.error(e);
     setStatus('処理中にエラーが発生しました', 'warn');
   }
-});
+}
+ocrYesBtn.addEventListener('click', () => startPipeline(true));
+ocrNoBtn.addEventListener('click', () => startPipeline(false));
 
 closeProcessBtn.addEventListener('click', () => {
   processPanel.classList.add('hidden');
@@ -531,6 +625,12 @@ function setStageDone(stage){
   li.classList.add('done');
   li.querySelector('.stage-state').textContent = '完了';
 }
+function setStageSkipped(stage){
+  const li = stageList.querySelector(`li[data-stage="${stage}"]`);
+  li.classList.remove('active');
+  li.classList.add('done');
+  li.querySelector('.stage-state').textContent = 'スキップ';
+}
 function resetStageList(){
   stageList.querySelectorAll('li').forEach(li => {
     li.classList.remove('active', 'done');
@@ -541,7 +641,7 @@ function resetStageList(){
 }
 function tick(){ return new Promise(r => setTimeout(r, 30)); }
 
-async function runPipeline(){
+async function runPipeline(withOcr){
   resetStageList();
   const pctx = processCanvas.getContext('2d');
 
@@ -565,13 +665,18 @@ async function runPipeline(){
   }
   setStageDone('enhance');
 
-  setStageActive('ocr');
-  for (const page of state.pages) {
-    const data = await runOCR(page.finalCanvas);
-    page.ocrText = data.text;
-    page.ocrWords = (data.words || []).map(w => ({ text: w.text, bbox: w.bbox }));
+  if (withOcr) {
+    setStageActive('ocr');
+    for (const page of state.pages) {
+      const result = await runOCR(page.finalCanvas);
+      page.ocrText = result.text;
+      page.ocrWords = result.words;
+    }
+    setStageDone('ocr');
+  } else {
+    for (const page of state.pages) { page.ocrText = null; page.ocrWords = null; }
+    setStageSkipped('ocr');
   }
-  setStageDone('ocr');
 
   setStageActive('pdf');
   const doc = await buildPDF();

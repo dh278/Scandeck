@@ -19,7 +19,7 @@
 | 指の写り込み除去 | 書類の輪郭内側だけを切り出すことで対応(完全な自動inpaintingは未対応) |
 | 影・ムラ除去 | チャンネルごとに背景を推定(dilate+medianBlur)し差分を正規化する古典的手法 |
 | コントラスト強調 | CLAHE(LAB色空間のL成分に適用) |
-| OCR | [Tesseract.js](https://github.com/naptha/tesseract.js)(`jpn+eng`) |
+| OCR | [Tesseract.js](https://github.com/naptha/tesseract.js)(既定は`jpn`のみ。速度優先で縮小画像に対して実行し、座標だけ元解像度に変換して埋め込む) |
 | PDF生成 | [jsPDF](https://github.com/parallax/jsPDF)(画像+透明テキストレイヤーで検索可能PDFに) |
 
 ## GitHub Pagesへのデプロイ
@@ -38,6 +38,8 @@ git push -u origin main
 ## 注意点・既知の制限
 
 - **カメラ利用にはHTTPS(またはlocalhost)が必須**です。GitHub Pagesは自動的にHTTPSになるので問題ありません。
+- 一部端末(特にiOS Safari)では、カメラセンサーが横向きでフレームを渡すのに画面表示だけ縦に回転させる仕様があり、撮影結果が90度ずれることがあります。`app.js`内で画面向きとセンサー向きの組み合わせから自動補正していますが、回転方向は端末依存のため完全ではありません。四隅調整画面の回転・反転ボタンで手動修正できます。
+- OCRは既定で`jpn`のみ・最大1600pxに縮小した画像に対して実行することで高速化しています。英数字が多い書類で精度を上げたい場合は、`app.js`内の`Tesseract.createWorker('jpn')`を`Tesseract.createWorker('jpn+eng')`に変更してください(その分低速になります)。
 - 指の写り込み除去は「輪郭内クロップ」による間接的な対応です。書類の内側にまで指がかかっている場合は完全には消せません。
 - OCRの精度は元画像の解像度・照明条件に左右されます。Tesseract.jsの初回実行時は言語データ(数MB)をCDNからダウンロードするため、オフライン環境では動作しません(完全オフライン化したい場合は `jpn.traineddata` / `eng.traineddata` をリポジトリに同梱し、`Tesseract.createWorker` の `langPath` オプションで指定してください)。
 - PDFの透明テキストレイヤーは単語単位のバウンディングボックスに基づく簡易実装のため、選択範囲の精度は市販スキャンアプリほど厳密ではありません。

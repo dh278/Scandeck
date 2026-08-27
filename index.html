@@ -46,6 +46,11 @@
 
     <!-- ===== 補正確認ビュー(撮影直後の四隅調整) ===== -->
     <section class="crop-stage hidden" id="cropStage">
+      <div class="crop-toolbar">
+        <button id="rotateCcwBtn" class="tool-btn" title="左に90度回転" aria-label="左に90度回転">↺</button>
+        <button id="rotateCwBtn" class="tool-btn" title="右に90度回転" aria-label="右に90度回転">↻</button>
+        <button id="flipHBtn" class="tool-btn" title="左右反転(文字が鏡文字の場合)" aria-label="左右反転">⇋</button>
+      </div>
       <div class="crop-wrap">
         <canvas id="cropCanvas"></canvas>
         <svg id="cropSvg"></svg>
@@ -76,11 +81,17 @@
   <!-- ===== 処理進捗パネル(モーダル的表示) ===== -->
   <section class="process-panel hidden" id="processPanel">
     <div class="process-card">
-      <div class="scan-window">
+      <div class="ocr-choice" id="ocrChoice">
+        <p class="ocr-choice-title">OCR(文字認識)を行いますか?</p>
+        <p class="ocr-choice-desc">文字を認識すると、PDF内のテキストを検索・コピーできます。ページ数が多いと時間がかかるので、急ぐ場合は「なし」を選んでください。</p>
+        <button id="ocrYesBtn" class="primary-btn">OCRあり(検索可能PDF)</button>
+        <button id="ocrNoBtn" class="ghost-btn">OCRなし(画像のみ・高速)</button>
+      </div>
+      <div class="scan-window hidden" id="scanWindow">
         <canvas id="processCanvas"></canvas>
         <div class="scan-line" id="scanLine"></div>
       </div>
-      <ol class="stage-list" id="stageList">
+      <ol class="stage-list hidden" id="stageList">
         <li data-stage="shadow"><span class="stage-idx">01</span><span class="stage-name">影・ムラ除去</span><span class="stage-state">待機</span></li>
         <li data-stage="enhance"><span class="stage-idx">02</span><span class="stage-name">コントラスト調整</span><span class="stage-state">待機</span></li>
         <li data-stage="ocr"><span class="stage-idx">03</span><span class="stage-name">文字認識(OCR)</span><span class="stage-state">待機</span></li>
