@@ -191,6 +191,16 @@ button{ font-family: var(--font-jp); }
   color: var(--ink-soft);
   text-align:center;
 }
+.engine-banner{
+  margin:0;
+  padding:10px 12px;
+  border-radius: var(--radius);
+  background: rgba(232,178,58,0.12);
+  border:1px solid var(--warn);
+  color: var(--warn);
+  font-size:12px;
+  text-align:center;
+}
 .crop-controls{
   display:flex; gap:10px;
 }

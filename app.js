@@ -41,16 +41,27 @@ const downloadBtn     = $('downloadBtn');
 const closeProcessBtn = $('closeProcessBtn');
 const statusDot       = $('statusDot');
 const statusText      = $('statusText');
+const engineBanner    = $('engineBanner');
 
 function setStatus(text, kind){
   statusText.textContent = text;
   statusDot.className = 'readout-dot' + (kind ? ' ' + kind : '');
 }
 
+/* ---------------- OpenCVの読み込み状態をボタン/バナーに反映 ---------------- */
+function updateEngineBanner(){
+  const ready = state.cvReady;
+  engineBanner.classList.toggle('hidden', ready);
+  confirmCropBtn.disabled = !ready;
+  confirmCropBtn.style.opacity = ready ? '1' : '0.5';
+  confirmCropBtn.textContent = ready ? 'この範囲で確定' : '読み込み中…';
+}
+
 /* ---------------- OpenCV readiness ---------------- */
 function onCvReady(){
   state.cvReady = true;
   setStatus('準備完了', 'ready');
+  updateEngineBanner();
 }
 if (typeof cv !== 'undefined') {
   cv['onRuntimeInitialized'] = onCvReady;
@@ -63,6 +74,13 @@ if (typeof cv !== 'undefined') {
     }
   }, 200);
 }
+// 読み込みが極端に遅い/失敗している場合にネットワーク要因を案内する
+setTimeout(() => {
+  if (!state.cvReady) {
+    engineBanner.textContent = '画像処理エンジンの読み込みに時間がかかっています。通信環境を確認するか、ページを再読み込みしてください';
+    setStatus('エンジン読込が遅延中', 'warn');
+  }
+}, 15000);
 
 /* ============================================================
    カメラ
@@ -129,6 +147,7 @@ function openCropStage(srcCanvas){
   const quad = detectQuad(srcCanvas) || defaultQuad(srcCanvas.width, srcCanvas.height);
   state.cropQuad = quad;
   renderCropHandles(scale);
+  updateEngineBanner();
 }
 
 function defaultQuad(w, h){
@@ -280,7 +299,7 @@ retakeBtn.addEventListener('click', () => {
 
 /* ---- 透視変換(斜め補正/指の写り込み除去) ---- */
 confirmCropBtn.addEventListener('click', () => {
-  if (!state.cvReady) { setStatus('画像処理エンジンを読み込み中です…', 'warn'); return; }
+  if (!state.cvReady) { updateEngineBanner(); return; }
   const warped = warpPerspective(state.cropSrcCanvas, state.cropQuad);
   addPage(warped);
   cropStage.classList.add('hidden');
