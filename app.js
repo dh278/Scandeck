@@ -99,7 +99,7 @@ async function startCamera(facingMode){
   const videoConstraints = (mode, exact) => ({
     video: {
       facingMode: exact ? { exact: mode } : { ideal: mode },
-      width: { ideal: 1920 }, height: { ideal: 1440 }
+      width: { ideal: 3000 }, height: { ideal: 4000 }
     },
     audio: false
   });
@@ -510,23 +510,24 @@ function removeShadow(canvas){
   const channels = new cv.MatVector();
   cv.split(src, channels);
   const resultChannels = new cv.MatVector();
-  const kernel = cv.Mat.ones(7, 7, cv.CV_8U);
 
   for (let i = 0; i < channels.size(); i++) {
     const ch = channels.get(i);
+
+    // 大きくぼかして「照明のムラ(≒影の形)」だけを背景として推定する
     const bg = new cv.Mat();
-    cv.dilate(ch, bg, kernel);
-    cv.medianBlur(bg, bg, 21);
-    const diff = new cv.Mat();
-    cv.absdiff(ch, bg, diff);
-    const inv = new cv.Mat();
-    cv.bitwise_not(diff, inv);
-    const norm = new cv.Mat();
-    cv.normalize(inv, norm, 0, 255, cv.NORM_MINMAX, cv.CV_8U);
-    resultChannels.push_back(norm);
-    ch.delete(); bg.delete(); diff.delete(); inv.delete();
+    cv.GaussianBlur(ch, bg, new cv.Size(0, 0), 25);
+
+    // 元画像を背景の明るさで割ることでムラを均す(差分方式よりノイズが増えにくい)
+    const chF = new cv.Mat(), bgF = new cv.Mat(), normF = new cv.Mat(), norm8 = new cv.Mat();
+    ch.convertTo(chF, cv.CV_32F);
+    bg.convertTo(bgF, cv.CV_32F, 1, 1); // ゼロ除算防止に+1
+    cv.divide(chF, bgF, normF, 255);
+    normF.convertTo(norm8, cv.CV_8U);
+
+    resultChannels.push_back(norm8);
+    ch.delete(); bg.delete(); chF.delete(); bgF.delete(); normF.delete();
   }
-  kernel.delete();
 
   const merged = new cv.Mat();
   cv.merge(resultChannels, merged);
@@ -550,7 +551,7 @@ function enhanceContrast(canvas){
   const labChannels = new cv.MatVector();
   cv.split(lab, labChannels);
   const l = labChannels.get(0);
-  const clahe = new cv.CLAHE(2.0, new cv.Size(8, 8));
+  const clahe = new cv.CLAHE(1.3, new cv.Size(8, 8));
   const l2 = new cv.Mat();
   clahe.apply(l, l2);
 
@@ -624,7 +625,7 @@ async function buildPDF(){
 
   state.pages.forEach((page, idx) => {
     const canvas = page.finalCanvas || page.canvas;
-    const imgData = canvas.toDataURL('image/jpeg', 0.85);
+    const imgData = canvas.toDataURL('image/jpeg', 0.94);
     const pageHpt = pageWpt * (canvas.height / canvas.width);
 
     if (idx === 0) {

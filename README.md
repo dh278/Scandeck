@@ -18,7 +18,7 @@
 | 斜め補正 | OpenCV.js の `getPerspectiveTransform` / `warpPerspective`(四隅ドラッグ+自動輪郭検出) |
 | A4/A3自動判定 | 補正後の縦横比がA4/A3(1:1.414)に近ければ、中央基準のクロップでその比率にきっちりスナップ(引き伸ばしはしないため文字は歪まない) |
 | 指の写り込み除去 | 書類の輪郭内側だけを切り出すことで対応(完全な自動inpaintingは未対応) |
-| 影・ムラ除去 | チャンネルごとに背景を推定(dilate+medianBlur)し差分を正規化する古典的手法 |
+| 影・ムラ除去 | チャンネルごとに大きくぼかした背景を推定し、元画像をその明るさで割って均一化する手法(差分反転方式よりノイズが増えにくい) |
 | コントラスト強調 | CLAHE(LAB色空間のL成分に適用) |
 | OCR | [Tesseract.js](https://github.com/naptha/tesseract.js)(既定は`jpn`のみ。速度優先で縮小画像に対して実行し、座標だけ元解像度に変換して埋め込む) |
 | PDF生成 | [jsPDF](https://github.com/parallax/jsPDF)(画像+透明テキストレイヤーで検索可能PDFに) |
