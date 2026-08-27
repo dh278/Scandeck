@@ -96,11 +96,22 @@ async function startCamera(facingMode){
   if (state.stream) {
     state.stream.getTracks().forEach(t => t.stop());
   }
+  const videoConstraints = (mode, exact) => ({
+    video: {
+      facingMode: exact ? { exact: mode } : { ideal: mode },
+      width: { ideal: 1920 }, height: { ideal: 1440 }
+    },
+    audio: false
+  });
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: facingMode }, width: { ideal: 1920 }, height: { ideal: 1440 } },
-      audio: false
-    });
+    let stream;
+    try {
+      // まず背面/前面カメラを厳密指定(意図しないカメラが選ばれるのを防ぐ)
+      stream = await navigator.mediaDevices.getUserMedia(videoConstraints(facingMode, true));
+    } catch (e) {
+      // 端末によっては exact 指定が失敗するため ideal にフォールバック
+      stream = await navigator.mediaDevices.getUserMedia(videoConstraints(facingMode, false));
+    }
     state.stream = stream;
     video.srcObject = stream;
     await video.play();
@@ -134,24 +145,8 @@ shutterBtn.addEventListener('click', () => {
   const vw = video.videoWidth, vh = video.videoHeight;
   if (!vw) return;
   const c = document.createElement('canvas');
-
-  // 一部端末(特にiOS Safari)では、カメラセンサーは横向きのフレームを渡す一方で
-  // 画面表示だけ縦に回転させていることがある。その場合そのままdrawImageすると
-  // 撮影結果が90度回転した状態になるため、画面が縦向きなのにセンサーが横向き
-  // (vw > vh)の組み合わせを検知して自動的に回転補正する。
-  const displayIsPortrait = window.matchMedia('(orientation: portrait)').matches;
-  const sensorIsLandscape = vw > vh;
-  if (displayIsPortrait && sensorIsLandscape) {
-    c.width = vh; c.height = vw;
-    const ctx = c.getContext('2d');
-    ctx.translate(c.width, 0);
-    ctx.rotate(Math.PI / 2);
-    ctx.drawImage(video, 0, 0, vw, vh);
-  } else {
-    c.width = vw; c.height = vh;
-    c.getContext('2d').drawImage(video, 0, 0, vw, vh);
-  }
-
+  c.width = vw; c.height = vh;
+  c.getContext('2d').drawImage(video, 0, 0, vw, vh);
   state.cropSrcCanvas = c;
   openCropStage(c);
 });
@@ -182,6 +177,20 @@ function defaultQuad(w, h){
 }
 
 /* ---- OpenCVによる書類の自動輪郭検出 ---- */
+// A4・A3はどちらも縦横比が1:√2(≒1:1.414)なので、その比率に近い
+// 四角形を優先して選ぶことで検出精度を上げる。
+const DOC_ASPECT = Math.SQRT2;
+function quadAspectScore(quad){
+  const w = (dist(quad.tl, quad.tr) + dist(quad.bl, quad.br)) / 2;
+  const h = (dist(quad.tl, quad.bl) + dist(quad.tr, quad.br)) / 2;
+  if (w <= 0 || h <= 0) return 0;
+  const ratio = Math.max(w, h) / Math.min(w, h);
+  const diff = Math.abs(ratio - DOC_ASPECT);
+  // 比率が近いほど1に近く、0.35以上ずれたら0点になる緩やかな評価
+  return Math.max(0, 1 - diff / 0.35);
+}
+function dist(a, b){ return Math.hypot(a.x - b.x, a.y - b.y); }
+
 function detectQuad(srcCanvas){
   if (!state.cvReady) return null;
   let src, small, gray, edges, contours, hierarchy, best = null;
@@ -205,7 +214,8 @@ function detectQuad(srcCanvas){
     cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
 
     const imgArea = small.cols * small.rows;
-    let bestArea = 0;
+    let bestScore = 0;
+    let bestQuad = null;
     for (let i = 0; i < contours.size(); i++) {
       const cnt = contours.get(i);
       const peri = cv.arcLength(cnt, true);
@@ -213,29 +223,32 @@ function detectQuad(srcCanvas){
       cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
       if (approx.rows === 4 && cv.isContourConvex(approx)) {
         const area = Math.abs(cv.contourArea(approx));
-        if (area > bestArea && area > imgArea * 0.2) {
-          bestArea = area;
-          if (best) best.delete();
-          best = approx;
-        } else {
-          approx.delete();
+        if (area > imgArea * 0.15) {
+          const pts = [];
+          for (let j = 0; j < 4; j++) {
+            pts.push({ x: approx.intPtr(j, 0)[0], y: approx.intPtr(j, 0)[1] });
+          }
+          const quadCandidate = orderQuad(pts);
+          // 面積(大きいほど良い)とA4/A3比率への近さを組み合わせて評価
+          const areaScore = area / imgArea;
+          const score = areaScore * (0.5 + 0.5 * quadAspectScore(quadCandidate));
+          if (score > bestScore) {
+            bestScore = score;
+            bestQuad = quadCandidate;
+          }
         }
-      } else {
-        approx.delete();
       }
+      approx.delete();
       cnt.delete();
     }
 
-    let quad = null;
-    if (best) {
-      const pts = [];
-      for (let i = 0; i < 4; i++) {
-        pts.push({ x: best.intPtr(i, 0)[0] / ratio, y: best.intPtr(i, 0)[1] / ratio });
-      }
-      quad = orderQuad(pts);
-      best.delete();
-    }
-    return quad;
+    if (!bestQuad) return null;
+    // 縮小画像上の座標だったので元解像度に戻す
+    const scaleBack = (p) => ({ x: p.x / ratio, y: p.y / ratio });
+    return {
+      tl: scaleBack(bestQuad.tl), tr: scaleBack(bestQuad.tr),
+      br: scaleBack(bestQuad.br), bl: scaleBack(bestQuad.bl)
+    };
   } catch (e) {
     console.error('detectQuad error', e);
     return null;
