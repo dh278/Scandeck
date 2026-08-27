@@ -262,7 +262,8 @@ function detectQuad(srcCanvas){
 function orderQuad(pts){
   const bySum = [...pts].sort((a, b) => (a.x + a.y) - (b.x + b.y));
   const byDiff = [...pts].sort((a, b) => (a.x - a.y) - (b.x - b.y));
-  return { tl: bySum[0], br: bySum[3], tr: byDiff[0], bl: byDiff[3] };
+  // tl=x+y最小, br=x+y最大, tr=x-y最大, bl=x-y最小
+  return { tl: bySum[0], br: bySum[3], tr: byDiff[3], bl: byDiff[0] };
 }
 
 /* ---- 四隅ハンドルのドラッグ操作 ---- */
