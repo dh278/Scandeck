@@ -195,7 +195,7 @@ function detectQuad(srcCanvas){
   if (!state.cvReady) return null;
   let src, small, gray, edges, contours, hierarchy, best = null;
   try {
-    src = cv.imread(srcCanvas);
+    src = canvasToMat(srcCanvas);
     const ratio = 800 / src.cols;
     small = new cv.Mat();
     cv.resize(src, small, new cv.Size(Math.round(src.cols * ratio), Math.round(src.rows * ratio)));
@@ -364,6 +364,37 @@ rotateCcwBtn.addEventListener('click', () => applyTransform('rotateCCW'));
 rotateCwBtn.addEventListener('click', () => applyTransform('rotateCW'));
 flipHBtn.addEventListener('click', () => applyTransform('flipH'));
 
+/* ---- canvas → OpenCV Mat 変換(cv.imreadを使わない自前実装) ---- */
+function canvasToMat(canvas){
+  const ctx = canvas.getContext('2d');
+  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  return cv.matFromImageData(imgData);
+}
+
+/* ---- OpenCV Mat → canvas 変換(cv.imshowを使わない自前実装) ----
+   一部のOpenCV.jsビルドでcv.imread/cv.imshowが縦横を取り違える不具合があるため、
+   ImageDataを直接組み立てて回避する。 */
+function matToCanvas(mat){
+  let rgba = mat;
+  let needsDelete = false;
+  if (mat.channels() === 3) {
+    rgba = new cv.Mat();
+    cv.cvtColor(mat, rgba, cv.COLOR_RGB2RGBA);
+    needsDelete = true;
+  } else if (mat.channels() === 1) {
+    rgba = new cv.Mat();
+    cv.cvtColor(mat, rgba, cv.COLOR_GRAY2RGBA);
+    needsDelete = true;
+  }
+  const outCanvas = document.createElement('canvas');
+  outCanvas.width = rgba.cols;
+  outCanvas.height = rgba.rows;
+  const imgData = new ImageData(new Uint8ClampedArray(rgba.data), rgba.cols, rgba.rows);
+  outCanvas.getContext('2d').putImageData(imgData, 0, 0);
+  if (needsDelete) rgba.delete();
+  return outCanvas;
+}
+
 /* ---- 透視変換(斜め補正/指の写り込み除去) ---- */
 confirmCropBtn.addEventListener('click', () => {
   if (!state.cvReady) { updateEngineBanner(); return; }
@@ -382,16 +413,14 @@ function warpPerspective(srcCanvas, quad){
   const heightB = Math.hypot(tl.x - bl.x, tl.y - bl.y);
   const maxHeight = Math.max(heightA, heightB);
 
-  const src = cv.imread(srcCanvas);
+  const src = canvasToMat(srcCanvas);
   const srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y]);
   const dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, maxWidth, 0, maxWidth, maxHeight, 0, maxHeight]);
   const M = cv.getPerspectiveTransform(srcTri, dstTri);
   const dst = new cv.Mat();
   cv.warpPerspective(src, dst, M, new cv.Size(maxWidth, maxHeight), cv.INTER_LINEAR, cv.BORDER_REPLICATE);
 
-  const outCanvas = document.createElement('canvas');
-  outCanvas.width = maxWidth; outCanvas.height = maxHeight;
-  cv.imshow(outCanvas, dst);
+  const outCanvas = matToCanvas(dst);
 
   [src, dst, M, srcTri, dstTri].forEach(m => m.delete());
   return outCanvas;
@@ -438,7 +467,7 @@ function renderFilmstrip(){
    背景を推定(膨張+メディアンフィルタ)して差分を正規化する定番手法
    ============================================================ */
 function removeShadow(canvas){
-  const srcRGBA = cv.imread(canvas);
+  const srcRGBA = canvasToMat(canvas);
   const src = new cv.Mat();
   cv.cvtColor(srcRGBA, src, cv.COLOR_RGBA2RGB);
 
@@ -466,9 +495,7 @@ function removeShadow(canvas){
   const merged = new cv.Mat();
   cv.merge(resultChannels, merged);
 
-  const outCanvas = document.createElement('canvas');
-  outCanvas.width = canvas.width; outCanvas.height = canvas.height;
-  cv.imshow(outCanvas, merged);
+  const outCanvas = matToCanvas(merged);
 
   srcRGBA.delete(); src.delete(); channels.delete(); merged.delete();
   for (let i = 0; i < resultChannels.size(); i++) resultChannels.get(i).delete();
@@ -478,7 +505,7 @@ function removeShadow(canvas){
 
 /* ---- コントラスト強調(CLAHE, 文字の読み取りやすさ向上) ---- */
 function enhanceContrast(canvas){
-  const srcRGBA = cv.imread(canvas);
+  const srcRGBA = canvasToMat(canvas);
   const src = new cv.Mat();
   cv.cvtColor(srcRGBA, src, cv.COLOR_RGBA2RGB);
   const lab = new cv.Mat();
@@ -500,9 +527,7 @@ function enhanceContrast(canvas){
   const rgbOut = new cv.Mat();
   cv.cvtColor(labOut, rgbOut, cv.COLOR_Lab2RGB);
 
-  const outCanvas = document.createElement('canvas');
-  outCanvas.width = canvas.width; outCanvas.height = canvas.height;
-  cv.imshow(outCanvas, rgbOut);
+  const outCanvas = matToCanvas(rgbOut);
 
   srcRGBA.delete(); src.delete(); lab.delete(); labChannels.delete();
   l.delete(); l2.delete(); mergedVec.delete(); labOut.delete(); rgbOut.delete();
