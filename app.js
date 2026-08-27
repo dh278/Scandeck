@@ -186,8 +186,8 @@ function quadAspectScore(quad){
   if (w <= 0 || h <= 0) return 0;
   const ratio = Math.max(w, h) / Math.min(w, h);
   const diff = Math.abs(ratio - DOC_ASPECT);
-  // 比率が近いほど1に近く、0.35以上ずれたら0点になる緩やかな評価
-  return Math.max(0, 1 - diff / 0.35);
+  // 比率が近いほど1に近く、0.5以上ずれたら0点になる緩やかな評価
+  return Math.max(0, 1 - diff / 0.5);
 }
 function dist(a, b){ return Math.hypot(a.x - b.x, a.y - b.y); }
 
@@ -223,15 +223,17 @@ function detectQuad(srcCanvas){
       cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
       if (approx.rows === 4 && cv.isContourConvex(approx)) {
         const area = Math.abs(cv.contourArea(approx));
-        if (area > imgArea * 0.15) {
+        if (area > imgArea * 0.2) {
           const pts = [];
           for (let j = 0; j < 4; j++) {
             pts.push({ x: approx.intPtr(j, 0)[0], y: approx.intPtr(j, 0)[1] });
           }
           const quadCandidate = orderQuad(pts);
-          // 面積(大きいほど良い)とA4/A3比率への近さを組み合わせて評価
+          // 面積を主な判断材料にしつつ、A4/A3比率(1:1.414)に近いほど
+          // ごく僅かに加点する程度に留める(強く効かせると、撮影角度による
+          // 見た目のゆがみで本来の書類より小さい輪郭を誤選択してしまうため)
           const areaScore = area / imgArea;
-          const score = areaScore * (0.5 + 0.5 * quadAspectScore(quadCandidate));
+          const score = areaScore + 0.12 * quadAspectScore(quadCandidate);
           if (score > bestScore) {
             bestScore = score;
             bestQuad = quadCandidate;
