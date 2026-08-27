@@ -10,6 +10,7 @@
 const state = {
   stream: null,
   facingMode: 'environment',
+  activeFacingMode: null,
   pages: [],            // { canvas, finalCanvas, ocrText, ocrWords }
   cropSrcCanvas: null,
   cropQuad: null,
@@ -93,6 +94,10 @@ setTimeout(() => {
    カメラ
    ============================================================ */
 async function startCamera(facingMode){
+  // 既に同じ向きのカメラが起動中なら、再度アクセス要求しない
+  if (state.stream && state.activeFacingMode === facingMode) {
+    return;
+  }
   if (state.stream) {
     state.stream.getTracks().forEach(t => t.stop());
   }
@@ -113,6 +118,7 @@ async function startCamera(facingMode){
       stream = await navigator.mediaDevices.getUserMedia(videoConstraints(facingMode, false));
     }
     state.stream = stream;
+    state.activeFacingMode = facingMode;
     video.srcObject = stream;
     await video.play();
     resizeOverlay();
