@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>SCANDECK — ブラウザだけで書類スキャン</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="deck">
+
+  <!-- ===== ヘッダー ===== -->
+  <header class="deck-header">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">SCANDECK</span>
+    </div>
+    <div class="readout" id="statusReadout">
+      <span class="readout-dot" id="statusDot"></span>
+      <span id="statusText">カメラ準備中…</span>
+    </div>
+  </header>
+
+  <!-- ===== メイン: ビューファインダー ===== -->
+  <main class="viewfinder-stage">
+
+    <section class="viewfinder" id="viewfinderSection">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="overlayCanvas"></canvas>
+
+      <div class="glass-hint" id="glassHint">
+        <p>書類全体が枠に入るように置いてください</p>
+      </div>
+
+      <div class="viewfinder-controls">
+        <button id="switchCamBtn" class="icon-btn" title="カメラ切替" aria-label="カメラ切替">⟲</button>
+        <button id="shutterBtn" class="shutter-btn" aria-label="撮影">
+          <span class="shutter-inner"></span>
+        </button>
+        <button id="doneBtn" class="icon-btn icon-btn-accent" title="PDFを作成" aria-label="PDFを作成">✓</button>
+      </div>
+    </section>
+
+    <!-- ===== 補正確認ビュー(撮影直後の四隅調整) ===== -->
+    <section class="crop-stage hidden" id="cropStage">
+      <div class="crop-wrap">
+        <canvas id="cropCanvas"></canvas>
+        <svg id="cropSvg"></svg>
+      </div>
+      <p class="crop-hint">四隅のハンドルをドラッグして書類の枠に合わせてください</p>
+      <div class="crop-controls">
+        <button id="retakeBtn" class="ghost-btn">撮り直す</button>
+        <button id="autoDetectBtn" class="ghost-btn">自動検出</button>
+        <button id="confirmCropBtn" class="primary-btn">この範囲で確定</button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ===== フィルムストリップ(撮影済みページ) ===== -->
+  <section class="filmstrip-wrap">
+    <div class="filmstrip-label">
+      <span class="eyebrow">PAGES</span>
+      <span class="page-count" id="pageCount">00</span>
+    </div>
+    <div class="filmstrip" id="filmstrip">
+      <!-- サムネイルがJSで挿入される -->
+      <div class="filmstrip-empty" id="filmstripEmpty">まだページがありません</div>
+    </div>
+  </section>
+
+  <!-- ===== 処理進捗パネル(モーダル的表示) ===== -->
+  <section class="process-panel hidden" id="processPanel">
+    <div class="process-card">
+      <div class="scan-window">
+        <canvas id="processCanvas"></canvas>
+        <div class="scan-line" id="scanLine"></div>
+      </div>
+      <ol class="stage-list" id="stageList">
+        <li data-stage="shadow"><span class="stage-idx">01</span><span class="stage-name">影・ムラ除去</span><span class="stage-state">待機</span></li>
+        <li data-stage="enhance"><span class="stage-idx">02</span><span class="stage-name">コントラスト調整</span><span class="stage-state">待機</span></li>
+        <li data-stage="ocr"><span class="stage-idx">03</span><span class="stage-name">文字認識(OCR)</span><span class="stage-state">待機</span></li>
+        <li data-stage="pdf"><span class="stage-idx">04</span><span class="stage-name">PDF組版</span><span class="stage-state">待機</span></li>
+      </ol>
+      <button id="downloadBtn" class="primary-btn hidden">PDFをダウンロード</button>
+      <button id="closeProcessBtn" class="ghost-btn hidden">閉じる</button>
+    </div>
+  </section>
+
+</div>
+
+<canvas id="workCanvas" class="hidden-canvas"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js"></script>
+<script src="https://docs.opencv.org/4.9.0/opencv.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

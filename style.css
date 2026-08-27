@@ -1,0 +1,352 @@
+/* ============================================
+   SCANDECK — design tokens
+   モチーフ: フラットベッドスキャナーの光学部
+   ============================================ */
+:root{
+  --paper:      #EEF1EC;   /* スキャナーガラス越しの紙色(寒色寄りの白) */
+  --paper-dim:  #E1E5DE;
+  --deck:       #171A18;   /* スキャナー筐体(本体パネル) */
+  --deck-raise: #21251F;
+  --ink:        #14171A;
+  --ink-soft:   #5B645C;
+  --line:       #C9CFC5;
+  --scan:       #2FD9C7;   /* 走査ライン(LED) */
+  --scan-dim:   rgba(47,217,199,0.18);
+  --shutter:    #E85A4F;   /* シャッター/確定アクション */
+  --shutter-dim:#C94A40;
+  --warn:       #E8B23A;
+
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-jp:   "Noto Sans JP", "Hiragino Sans", sans-serif;
+
+  --radius: 3px;
+}
+
+*{ box-sizing: border-box; }
+html,body{
+  margin:0; padding:0;
+  background: var(--deck);
+  color: var(--paper);
+  font-family: var(--font-jp);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+button{ font-family: var(--font-jp); }
+.hidden{ display:none !important; }
+.hidden-canvas{ display:none; }
+
+/* ============================================
+   Layout shell
+   ============================================ */
+.deck{
+  max-width: 720px;
+  margin: 0 auto;
+  min-height: 100dvh;
+  display:flex;
+  flex-direction:column;
+  background: var(--deck);
+}
+
+/* ============================================
+   Header — 機材の銘板 / LED readout
+   ============================================ */
+.deck-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #2B2F29;
+}
+.brand{ display:flex; align-items:center; gap:8px; }
+.brand-mark{
+  width:10px; height:10px;
+  background: var(--scan);
+  box-shadow: 0 0 8px 1px var(--scan);
+  border-radius:50%;
+}
+.brand-name{
+  font-family: var(--font-mono);
+  font-weight:600;
+  letter-spacing: 0.12em;
+  font-size: 14px;
+  color: var(--paper);
+}
+.readout{
+  display:flex; align-items:center; gap:6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-soft);
+  letter-spacing: 0.02em;
+}
+.readout-dot{
+  width:6px; height:6px; border-radius:50%;
+  background: var(--warn);
+}
+.readout-dot.ready{ background: var(--scan); }
+.readout-dot.busy{ background: var(--shutter); animation: pulse 1s infinite; }
+@keyframes pulse{ 50%{ opacity:0.3; } }
+
+/* ============================================
+   Viewfinder — ヒーロー(ライブカメラ)
+   ============================================ */
+.viewfinder-stage{ position:relative; flex:1; }
+.viewfinder{
+  position:relative;
+  width:100%;
+  aspect-ratio: 3/4;
+  background:#000;
+  overflow:hidden;
+}
+.viewfinder video{
+  width:100%; height:100%;
+  object-fit:cover;
+  display:block;
+}
+#overlayCanvas{
+  position:absolute; inset:0;
+  width:100%; height:100%;
+  pointer-events:none;
+}
+.glass-hint{
+  position:absolute; top:14px; left:0; right:0;
+  text-align:center;
+  pointer-events:none;
+}
+.glass-hint p{
+  display:inline-block;
+  margin:0;
+  padding:6px 12px;
+  background: rgba(20,23,26,0.55);
+  backdrop-filter: blur(2px);
+  border:1px solid rgba(255,255,255,0.15);
+  border-radius: var(--radius);
+  font-size:12px;
+  color: var(--paper);
+}
+
+.viewfinder-controls{
+  position:absolute;
+  left:0; right:0; bottom:18px;
+  display:flex; align-items:center; justify-content:center;
+  gap:28px;
+}
+.shutter-btn{
+  width:68px; height:68px;
+  border-radius:50%;
+  background: var(--paper);
+  border: 3px solid rgba(255,255,255,0.5);
+  display:flex; align-items:center; justify-content:center;
+  cursor:pointer;
+}
+.shutter-inner{
+  width:52px; height:52px;
+  border-radius:50%;
+  background: var(--shutter);
+  transition: transform .1s ease;
+}
+.shutter-btn:active .shutter-inner{ transform: scale(0.85); }
+
+.icon-btn{
+  width:44px; height:44px;
+  border-radius:50%;
+  border:1px solid rgba(255,255,255,0.3);
+  background: rgba(20,23,26,0.5);
+  color: var(--paper);
+  font-size:18px;
+  cursor:pointer;
+}
+.icon-btn-accent{
+  background: var(--scan);
+  color: var(--ink);
+  border-color: var(--scan);
+  font-weight:700;
+}
+
+/* ============================================
+   Crop stage — 四隅調整
+   ============================================ */
+.crop-stage{
+  padding: 16px;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+.crop-wrap{
+  position:relative;
+  width:100%;
+  background:#000;
+  border-radius: var(--radius);
+  overflow:hidden;
+}
+.crop-wrap canvas, .crop-wrap svg{
+  width:100%; height:auto; display:block;
+}
+#cropSvg{
+  position:absolute; inset:0;
+  touch-action:none;
+}
+.crop-hint{
+  margin:0;
+  font-size:12px;
+  color: var(--ink-soft);
+  text-align:center;
+}
+.crop-controls{
+  display:flex; gap:10px;
+}
+
+/* ============================================
+   Buttons
+   ============================================ */
+.primary-btn, .ghost-btn{
+  flex:1;
+  padding:13px 16px;
+  border-radius: var(--radius);
+  font-size:14px;
+  font-weight:700;
+  cursor:pointer;
+  border:1px solid transparent;
+}
+.primary-btn{
+  background: var(--scan);
+  color: var(--ink);
+}
+.ghost-btn{
+  background:transparent;
+  border-color: #3A3F37;
+  color: var(--paper);
+}
+
+/* ============================================
+   Filmstrip — 撮影済みページ(フィルムの穴モチーフ)
+   ============================================ */
+.filmstrip-wrap{
+  border-top: 1px solid #2B2F29;
+  padding: 12px 16px 16px;
+}
+.filmstrip-label{
+  display:flex; justify-content:space-between; align-items:baseline;
+  margin-bottom:8px;
+}
+.eyebrow{
+  font-family: var(--font-mono);
+  font-size:10px;
+  letter-spacing:0.16em;
+  color: var(--ink-soft);
+}
+.page-count{
+  font-family: var(--font-mono);
+  font-size:12px;
+  color: var(--scan);
+}
+.filmstrip{
+  display:flex;
+  gap:10px;
+  overflow-x:auto;
+  padding: 8px 0;
+  scrollbar-width:none;
+}
+.filmstrip::-webkit-scrollbar{ display:none; }
+.filmstrip-empty{
+  font-size:12px;
+  color: var(--ink-soft);
+  padding: 20px 8px;
+}
+.film-cell{
+  position:relative;
+  flex: 0 0 auto;
+  width:64px; height:84px;
+  border-radius:2px;
+  overflow:hidden;
+  border:1px solid #3A3F37;
+  background: var(--paper);
+}
+.film-cell img{ width:100%; height:100%; object-fit:cover; display:block; }
+.film-cell .film-num{
+  position:absolute; top:2px; left:3px;
+  font-family: var(--font-mono);
+  font-size:9px;
+  color:#fff;
+  text-shadow: 0 0 3px rgba(0,0,0,0.9);
+}
+.film-cell .film-del{
+  position:absolute; top:2px; right:2px;
+  width:16px; height:16px;
+  border-radius:50%;
+  background: rgba(20,23,26,0.75);
+  color:#fff;
+  border:none;
+  font-size:10px;
+  line-height:16px;
+  cursor:pointer;
+}
+
+/* ============================================
+   Process panel — スキャンライン演出
+   ============================================ */
+.process-panel{
+  position:fixed; inset:0;
+  background: rgba(10,12,10,0.92);
+  display:flex; align-items:center; justify-content:center;
+  padding:20px;
+  z-index:50;
+}
+.process-card{
+  width:100%; max-width:420px;
+  background: var(--deck-raise);
+  border:1px solid #3A3F37;
+  border-radius: var(--radius);
+  padding:18px;
+  display:flex; flex-direction:column; gap:16px;
+}
+.scan-window{
+  position:relative;
+  width:100%;
+  aspect-ratio: 3/4;
+  background:#000;
+  overflow:hidden;
+  border-radius:2px;
+}
+.scan-window canvas{
+  width:100%; height:100%; object-fit:contain;
+}
+.scan-line{
+  position:absolute; left:0; right:0; top:0;
+  height:2px;
+  background: var(--scan);
+  box-shadow: 0 0 12px 2px var(--scan);
+  animation: sweep 1.8s ease-in-out infinite;
+}
+@keyframes sweep{
+  0%{ top:0%; }
+  50%{ top:98%; }
+  100%{ top:0%; }
+}
+.stage-list{
+  list-style:none;
+  margin:0; padding:0;
+  display:flex; flex-direction:column; gap:2px;
+}
+.stage-list li{
+  display:flex; align-items:center; gap:10px;
+  padding:8px 4px;
+  font-family: var(--font-mono);
+  font-size:12px;
+  border-bottom: 1px solid #2B2F29;
+  color: var(--ink-soft);
+}
+.stage-idx{ opacity:0.6; }
+.stage-name{ flex:1; color: var(--paper); font-family: var(--font-jp); }
+.stage-state{ font-size:10px; letter-spacing:0.05em; }
+.stage-list li.active .stage-state{ color: var(--scan); }
+.stage-list li.active{ border-color: var(--scan-dim); }
+.stage-list li.done .stage-state{ color:#7C8A7C; }
+
+/* ============================================
+   Responsive
+   ============================================ */
+@media (min-width: 560px){
+  .deck-header{ padding:18px 24px; }
+  .filmstrip-wrap{ padding:16px 24px 20px; }
+  .crop-stage{ padding:20px 24px; }
+}
