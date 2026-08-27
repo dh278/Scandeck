@@ -92,10 +92,11 @@
         <div class="scan-line" id="scanLine"></div>
       </div>
       <ol class="stage-list hidden" id="stageList">
-        <li data-stage="shadow"><span class="stage-idx">01</span><span class="stage-name">影・ムラ除去</span><span class="stage-state">待機</span></li>
-        <li data-stage="enhance"><span class="stage-idx">02</span><span class="stage-name">コントラスト調整</span><span class="stage-state">待機</span></li>
-        <li data-stage="ocr"><span class="stage-idx">03</span><span class="stage-name">文字認識(OCR)</span><span class="stage-state">待機</span></li>
-        <li data-stage="pdf"><span class="stage-idx">04</span><span class="stage-name">PDF組版</span><span class="stage-state">待機</span></li>
+        <li data-stage="orient"><span class="stage-idx">01</span><span class="stage-name">向き自動判定</span><span class="stage-state">待機</span></li>
+        <li data-stage="shadow"><span class="stage-idx">02</span><span class="stage-name">影・ムラ除去</span><span class="stage-state">待機</span></li>
+        <li data-stage="enhance"><span class="stage-idx">03</span><span class="stage-name">コントラスト調整</span><span class="stage-state">待機</span></li>
+        <li data-stage="ocr"><span class="stage-idx">04</span><span class="stage-name">文字認識(OCR)</span><span class="stage-state">待機</span></li>
+        <li data-stage="pdf"><span class="stage-idx">05</span><span class="stage-name">PDF組版</span><span class="stage-state">待機</span></li>
       </ol>
       <button id="downloadBtn" class="primary-btn hidden">PDFをダウンロード</button>
       <button id="closeProcessBtn" class="ghost-btn hidden">閉じる</button>

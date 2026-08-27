@@ -141,12 +141,33 @@ window.addEventListener('load', () => {
 /* ============================================================
    撮影 → 四隅調整ステージ
    ============================================================ */
+/* ---- 端末の向き(縦/横)を取得する ---- */
+function getOrientationAngle(){
+  if (screen.orientation && typeof screen.orientation.angle === 'number') {
+    return screen.orientation.angle; // 0, 90, 180, 270
+  }
+  if (typeof window.orientation === 'number') {
+    return ((window.orientation % 360) + 360) % 360;
+  }
+  return 0;
+}
+
 shutterBtn.addEventListener('click', () => {
   const vw = video.videoWidth, vh = video.videoHeight;
   if (!vw) return;
-  const c = document.createElement('canvas');
-  c.width = vw; c.height = vh;
-  c.getContext('2d').drawImage(video, 0, 0, vw, vh);
+  const raw = document.createElement('canvas');
+  raw.width = vw; raw.height = vh;
+  raw.getContext('2d').drawImage(video, 0, 0, vw, vh);
+
+  // スマホを横向きにして撮影した場合、読みやすい向きに自動回転する
+  const angle = getOrientationAngle();
+  let c = raw;
+  if (angle === 90) {
+    c = transformCanvas(raw, 'rotateCW');
+  } else if (angle === 270) {
+    c = transformCanvas(raw, 'rotateCCW');
+  }
+
   state.cropSrcCanvas = c;
   openCropStage(c);
 });
@@ -354,6 +375,11 @@ function transformCanvas(srcCanvas, type){
     c.width = srcCanvas.height; c.height = srcCanvas.width;
     ctx.translate(0, c.height);
     ctx.rotate(-Math.PI / 2);
+    ctx.drawImage(srcCanvas, 0, 0);
+  } else if (type === 'rotate180') {
+    c.width = srcCanvas.width; c.height = srcCanvas.height;
+    ctx.translate(c.width, c.height);
+    ctx.rotate(Math.PI);
     ctx.drawImage(srcCanvas, 0, 0);
   }
   return c;
@@ -573,6 +599,33 @@ function enhanceContrast(canvas){
 }
 
 /* ============================================================
+   ページの向き自動判定・補正(Tesseract.js の OSD機能を利用)
+   四隅の検出だけでは「書類がどちらを上にして置かれているか」は
+   分からないため、文字の向きを解析して0/90/180/270度を判定し補正する。
+   ============================================================ */
+let osdWorker = null;
+async function getOsdWorker(){
+  if (osdWorker) return osdWorker;
+  osdWorker = await Tesseract.createWorker('eng', 1, { legacyCore: true, legacyLang: true });
+  return osdWorker;
+}
+
+async function detectAndFixOrientation(canvas){
+  try {
+    const worker = await getOsdWorker();
+    const { data } = await worker.detect(canvas);
+    const deg = Math.round((data && data.orientation_degrees) || 0);
+    if (deg === 90) return transformCanvas(canvas, 'rotateCW');
+    if (deg === 180) return transformCanvas(canvas, 'rotate180');
+    if (deg === 270) return transformCanvas(canvas, 'rotateCCW');
+    return canvas;
+  } catch (e) {
+    console.error('orientation detect error', e);
+    return canvas; // 判定に失敗した場合は元の向きのまま進める
+  }
+}
+
+/* ============================================================
    OCR (Tesseract.js, 日本語)
    速度優先のため既定は日本語のみ。英数字混在の書類が多い場合は
    下の 'jpn' を 'jpn+eng' に変更すると精度は上がるが低速になる。
@@ -719,6 +772,13 @@ function tick(){ return new Promise(r => setTimeout(r, 30)); }
 async function runPipeline(withOcr){
   resetStageList();
   const pctx = processCanvas.getContext('2d');
+
+  setStageActive('orient');
+  for (const page of state.pages) {
+    page.canvas = await detectAndFixOrientation(page.canvas);
+  }
+  renderFilmstrip();
+  setStageDone('orient');
 
   setStageActive('shadow');
   for (const page of state.pages) {
