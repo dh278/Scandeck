@@ -16,6 +16,8 @@ const state = {
   cropQuad: null,
   cvReady: false,
   pdfDoc: null,
+  uploadQueue: [],
+  paperSize: 'other',
 };
 
 /* ---------------- DOM ---------------- */
@@ -24,6 +26,8 @@ const video           = $('video');
 const overlayCanvas   = $('overlayCanvas');
 const shutterBtn      = $('shutterBtn');
 const switchCamBtn    = $('switchCamBtn');
+const uploadBtn       = $('uploadBtn');
+const fileInput       = $('fileInput');
 const doneBtn         = $('doneBtn');
 const cropStage       = $('cropStage');
 const viewfinderSection = $('viewfinderSection');
@@ -42,6 +46,11 @@ const processPanel    = $('processPanel');
 const ocrChoice       = $('ocrChoice');
 const ocrYesBtn       = $('ocrYesBtn');
 const ocrNoBtn        = $('ocrNoBtn');
+const reviewStage     = $('reviewStage');
+const reviewGrid      = $('reviewGrid');
+const reviewContinueBtn = $('reviewContinueBtn');
+const paperChoice     = $('paperChoice');
+const paperSizeBtns   = document.querySelectorAll('.paper-size-btn');
 const scanWindow      = $('scanWindow');
 const processCanvas   = $('processCanvas');
 const stageList       = $('stageList');
@@ -175,8 +184,63 @@ shutterBtn.addEventListener('click', () => {
   }
 
   state.cropSrcCanvas = c;
+  retakeBtn.textContent = '撮り直す';
   openCropStage(c);
 });
+
+/* ============================================================
+   写真ファイルからのアップロード
+   ============================================================ */
+uploadBtn.addEventListener('click', () => fileInput.click());
+
+fileInput.addEventListener('change', (e) => {
+  const files = Array.from(e.target.files || []);
+  fileInput.value = ''; // 同じファイルを連続で選んでもchangeが発火するようにリセット
+  if (!files.length) return;
+  state.uploadQueue = files;
+  processNextUpload();
+});
+
+function fileToCanvas(file){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      c.getContext('2d').drawImage(img, 0, 0);
+      URL.revokeObjectURL(img.src);
+      resolve(c);
+    };
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+async function processNextUpload(){
+  if (!state.uploadQueue.length) return;
+  const file = state.uploadQueue.shift();
+  try {
+    const canvas = await fileToCanvas(file);
+    state.cropSrcCanvas = canvas;
+    retakeBtn.textContent = state.uploadQueue.length > 0 ? 'スキップ' : 'キャンセル';
+    openCropStage(canvas);
+  } catch (e) {
+    console.error('file load error', e);
+    setStatus('画像を読み込めませんでした', 'warn');
+    await processNextUpload();
+  }
+}
+
+// 四隅調整を終えた後、アップロード待ちがあれば次のファイルへ、なければビューファインダーに戻る
+function proceedAfterCrop(){
+  if (state.uploadQueue.length > 0) {
+    processNextUpload();
+  } else {
+    cropStage.classList.add('hidden');
+    viewfinderSection.classList.remove('hidden');
+  }
+}
 
 function openCropStage(srcCanvas){
   viewfinderSection.classList.add('hidden');
@@ -203,75 +267,48 @@ function defaultQuad(w, h){
   };
 }
 
-/* ---- OpenCVによる書類の自動輪郭検出 ---- */
-// A4・A3はどちらも縦横比が1:√2(≒1:1.414)なので、その比率に近い
-// 四角形を優先して選ぶことで検出精度を上げる。
-const DOC_ASPECT = Math.SQRT2;
-function quadAspectScore(quad){
-  const w = (dist(quad.tl, quad.tr) + dist(quad.bl, quad.br)) / 2;
-  const h = (dist(quad.tl, quad.bl) + dist(quad.tr, quad.br)) / 2;
-  if (w <= 0 || h <= 0) return 0;
-  const ratio = Math.max(w, h) / Math.min(w, h);
-  const diff = Math.abs(ratio - DOC_ASPECT);
-  // 比率が近いほど1に近く、0.5以上ずれたら0点になる緩やかな評価
-  return Math.max(0, 1 - diff / 0.5);
-}
-function dist(a, b){ return Math.hypot(a.x - b.x, a.y - b.y); }
-
+/* ---- OpenCVによる書類の自動輪郭検出 ----
+   紙サイズの判定はやめ、その分「本当に書類の輪郭を見つけられるか」の
+   精度に全振りする。Canny法(しきい値2種)+大津の二値化、計3種類の
+   手法を試し、見つかった中で一番面積が大きい有効な四角形を採用する
+   アンサンブル方式にすることで、照明条件や背景の違いに強くする。 */
 function detectQuad(srcCanvas){
   if (!state.cvReady) return null;
-  let src, small, gray, edges, contours, hierarchy, best = null;
+  let src, small, gray;
   try {
     src = canvasToMat(srcCanvas);
-    const ratio = 800 / src.cols;
+    const ratio = 1000 / src.cols;
     small = new cv.Mat();
     cv.resize(src, small, new cv.Size(Math.round(src.cols * ratio), Math.round(src.rows * ratio)));
 
     gray = new cv.Mat();
     cv.cvtColor(small, gray, cv.COLOR_RGBA2GRAY);
-    cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
-    edges = new cv.Mat();
-    cv.Canny(gray, edges, 50, 150);
-    const kernel = cv.Mat.ones(3, 3, cv.CV_8U);
-    cv.dilate(edges, edges, kernel);
-    kernel.delete();
 
-    contours = new cv.MatVector();
-    hierarchy = new cv.Mat();
-    cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+    const candidates = [];
 
-    const imgArea = small.cols * small.rows;
-    let bestScore = 0;
-    let bestQuad = null;
-    for (let i = 0; i < contours.size(); i++) {
-      const cnt = contours.get(i);
-      const peri = cv.arcLength(cnt, true);
-      const approx = new cv.Mat();
-      cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
-      if (approx.rows === 4 && cv.isContourConvex(approx)) {
-        const area = Math.abs(cv.contourArea(approx));
-        if (area > imgArea * 0.2) {
-          const pts = [];
-          for (let j = 0; j < 4; j++) {
-            pts.push({ x: approx.intPtr(j, 0)[0], y: approx.intPtr(j, 0)[1] });
-          }
-          const quadCandidate = orderQuad(pts);
-          // 面積を主な判断材料にしつつ、A4/A3比率(1:1.414)に近いほど
-          // ごく僅かに加点する程度に留める(強く効かせると、撮影角度による
-          // 見た目のゆがみで本来の書類より小さい輪郭を誤選択してしまうため)
-          const areaScore = area / imgArea;
-          const score = areaScore + 0.12 * quadAspectScore(quadCandidate);
-          if (score > bestScore) {
-            bestScore = score;
-            bestQuad = quadCandidate;
-          }
-        }
-      }
-      approx.delete();
-      cnt.delete();
-    }
+    // 手法1・2: Canny法をしきい値を変えて2回試す
+    [[50, 150], [30, 100]].forEach(([lo, hi]) => {
+      const blurred = new cv.Mat();
+      cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
+      const edges = new cv.Mat();
+      cv.Canny(blurred, edges, lo, hi);
+      const kernel = cv.Mat.ones(3, 3, cv.CV_8U);
+      cv.dilate(edges, edges, kernel);
+      kernel.delete();
+      collectQuadCandidates(edges, small, candidates);
+      blurred.delete(); edges.delete();
+    });
 
-    if (!bestQuad) return null;
+    // 手法3: 大津の二値化(書類と背景の明暗差が大きい場合に強い)
+    const thresh = new cv.Mat();
+    cv.threshold(gray, thresh, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
+    collectQuadCandidates(thresh, small, candidates);
+    thresh.delete();
+
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => b.area - a.area);
+    const bestQuad = candidates[0].quad;
+
     // 縮小画像上の座標だったので元解像度に戻す
     const scaleBack = (p) => ({ x: p.x / ratio, y: p.y / ratio });
     return {
@@ -282,8 +319,36 @@ function detectQuad(srcCanvas){
     console.error('detectQuad error', e);
     return null;
   } finally {
-    [src, small, gray, edges, contours, hierarchy].forEach(m => m && m.delete());
+    [src, small, gray].forEach(m => m && m.delete());
   }
+}
+
+// 二値化/エッジ画像から、有効な(凸な4点で一定以上の面積を持つ)四角形候補を集める
+function collectQuadCandidates(binaryMat, refMat, candidates){
+  const contours = new cv.MatVector();
+  const hierarchy = new cv.Mat();
+  cv.findContours(binaryMat, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+  const imgArea = refMat.cols * refMat.rows;
+  for (let i = 0; i < contours.size(); i++) {
+    const cnt = contours.get(i);
+    const peri = cv.arcLength(cnt, true);
+    const approx = new cv.Mat();
+    cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
+    if (approx.rows === 4 && cv.isContourConvex(approx)) {
+      const area = Math.abs(cv.contourArea(approx));
+      if (area > imgArea * 0.15) {
+        const pts = [];
+        for (let j = 0; j < 4; j++) {
+          pts.push({ x: approx.intPtr(j, 0)[0], y: approx.intPtr(j, 0)[1] });
+        }
+        candidates.push({ area, quad: orderQuad(pts) });
+      }
+    }
+    approx.delete();
+    cnt.delete();
+  }
+  contours.delete();
+  hierarchy.delete();
 }
 
 function orderQuad(pts){
@@ -359,8 +424,7 @@ autoDetectBtn.addEventListener('click', () => {
 });
 
 retakeBtn.addEventListener('click', () => {
-  cropStage.classList.add('hidden');
-  viewfinderSection.classList.remove('hidden');
+  proceedAfterCrop();
 });
 
 /* ---- 回転・左右反転(鏡文字/横向きの補正) ---- */
@@ -430,27 +494,21 @@ function matToCanvas(mat){
   return outCanvas;
 }
 
-/* ---- A4/A3サイズへのスナップ補正 ----
-   輪郭検出が多少ズレても、最終的な縦横比がA4/A3(1:1.414)に近ければ
-   その比率へきっちり合わせる(はみ出した分を中央基準でクロップするだけで、
-   引き伸ばしはしない=文字が歪まない)。全く違う比率の場合はそのまま返す。 */
-function snapToStandardAspect(canvas){
-  const target = Math.SQRT2; // A4/A3の縦横比 ≒ 1.4142
+/* ---- 指定した縦横比へのスナップ補正 ----
+   用紙サイズが選ばれたとき、はみ出した分を中央基準でクロップして
+   その比率にきっちり合わせる(引き伸ばしはしない=文字は歪まない)。 */
+function snapToAspectRatio(canvas, targetRatio){
   const w = canvas.width, h = canvas.height;
-  const ratio = Math.max(w, h) / Math.min(w, h);
-  const tolerance = 0.12; // ここから±12%程度ズレていたら書類サイズと見なさない
-  if (Math.abs(ratio - target) > tolerance) return canvas;
-
   const portrait = h >= w;
   let targetW = w, targetH = h;
   if (portrait) {
-    const idealH = w * target;
+    const idealH = w * targetRatio;
     if (idealH <= h) { targetH = Math.round(idealH); }
-    else { targetW = Math.round(h / target); }
+    else { targetW = Math.round(h / targetRatio); }
   } else {
-    const idealW = h * target;
+    const idealW = h * targetRatio;
     if (idealW <= w) { targetW = Math.round(idealW); }
-    else { targetH = Math.round(w / target); }
+    else { targetH = Math.round(w / targetRatio); }
   }
   if (targetW === w && targetH === h) return canvas;
 
@@ -465,11 +523,9 @@ function snapToStandardAspect(canvas){
 /* ---- 透視変換(斜め補正/指の写り込み除去) ---- */
 confirmCropBtn.addEventListener('click', () => {
   if (!state.cvReady) { updateEngineBanner(); return; }
-  let warped = warpPerspective(state.cropSrcCanvas, state.cropQuad);
-  warped = snapToStandardAspect(warped);
+  const warped = warpPerspective(state.cropSrcCanvas, state.cropQuad);
   addPage(warped);
-  cropStage.classList.add('hidden');
-  viewfinderSection.classList.remove('hidden');
+  proceedAfterCrop();
 });
 
 function warpPerspective(srcCanvas, quad){
@@ -604,32 +660,7 @@ function enhanceContrast(canvas){
   return outCanvas;
 }
 
-/* ============================================================
-   ページの向き自動判定・補正(Tesseract.js の OSD機能を利用)
-   四隅の検出だけでは「書類がどちらを上にして置かれているか」は
-   分からないため、文字の向きを解析して0/90/180/270度を判定し補正する。
-   ============================================================ */
-let osdWorker = null;
-async function getOsdWorker(){
-  if (osdWorker) return osdWorker;
-  osdWorker = await Tesseract.createWorker('eng', 1, { legacyCore: true, legacyLang: true });
-  return osdWorker;
-}
 
-async function detectAndFixOrientation(canvas){
-  try {
-    const worker = await getOsdWorker();
-    const { data } = await worker.detect(canvas);
-    const deg = Math.round((data && data.orientation_degrees) || 0);
-    if (deg === 90) return transformCanvas(canvas, 'rotateCW');
-    if (deg === 180) return transformCanvas(canvas, 'rotate180');
-    if (deg === 270) return transformCanvas(canvas, 'rotateCCW');
-    return canvas;
-  } catch (e) {
-    console.error('orientation detect error', e);
-    return canvas; // 判定に失敗した場合は元の向きのまま進める
-  }
-}
 
 /* ============================================================
    OCR (Tesseract.js, 日本語)
@@ -680,12 +711,26 @@ async function runOCR(canvas){
 async function buildPDF(){
   const { jsPDF } = window.jspdf;
   let doc = null;
-  const pageWpt = 595.28; // A4幅(pt)を基準に各ページの縦横比を保持
+  // 用紙サイズ(短辺)のpt換算値(1mm = 2.83465pt)。A2/A3/A4はすべて縦横比が同じ(1:√2)。
+  const PAPER_SHORT_SIDE_PT = { a4: 595.28, a3: 841.89, a2: 1190.55 };
 
   state.pages.forEach((page, idx) => {
     const canvas = page.finalCanvas || page.canvas;
     const imgData = canvas.toDataURL('image/jpeg', 0.94);
-    const pageHpt = pageWpt * (canvas.height / canvas.width);
+    const portrait = canvas.height >= canvas.width;
+
+    let pageWpt, pageHpt;
+    const shortSide = PAPER_SHORT_SIDE_PT[state.paperSize];
+    if (shortSide) {
+      // A2/A3/A4が選ばれていれば、その用紙の実寸(pt)でページを作る
+      const longSide = shortSide * Math.SQRT2;
+      pageWpt = portrait ? shortSide : longSide;
+      pageHpt = portrait ? longSide : shortSide;
+    } else {
+      // 「その他」= 検出した縦横比のまま、A4幅を基準に換算するだけ
+      pageWpt = 595.28;
+      pageHpt = pageWpt * (canvas.height / canvas.width);
+    }
 
     if (idx === 0) {
       doc = new jsPDF({ unit: 'pt', format: [pageWpt, pageHpt] });
@@ -722,6 +767,8 @@ doneBtn.addEventListener('click', () => {
   if (state.pages.length === 0) { setStatus('先に撮影してください', 'warn'); return; }
   processPanel.classList.remove('hidden');
   ocrChoice.classList.remove('hidden');
+  reviewStage.classList.add('hidden');
+  paperChoice.classList.add('hidden');
   scanWindow.classList.add('hidden');
   stageList.classList.add('hidden');
   downloadBtn.classList.add('hidden');
@@ -779,13 +826,6 @@ async function runPipeline(withOcr){
   resetStageList();
   const pctx = processCanvas.getContext('2d');
 
-  setStageActive('orient');
-  for (const page of state.pages) {
-    page.canvas = await detectAndFixOrientation(page.canvas);
-  }
-  renderFilmstrip();
-  setStageDone('orient');
-
   setStageActive('shadow');
   for (const page of state.pages) {
     const shadowFree = removeShadow(page.canvas);
@@ -805,6 +845,12 @@ async function runPipeline(withOcr){
     await tick();
   }
   setStageDone('enhance');
+
+  // ここで一旦止めて、仕上がりを見ながら向きを手動確認・修正してもらう
+  await showReviewStage();
+
+  // 用紙サイズを選んでもらい、指定があればその比率にきっちり合わせる
+  await showPaperSizeStage();
 
   if (withOcr) {
     setStageActive('ocr');
@@ -827,6 +873,94 @@ async function runPipeline(withOcr){
   downloadBtn.classList.remove('hidden');
   closeProcessBtn.classList.remove('hidden');
   setStatus('PDF作成完了', 'ready');
+}
+
+/* ---- 向き手動レビュー画面 ---- */
+function renderReviewGrid(){
+  reviewGrid.innerHTML = '';
+  state.pages.forEach((page, idx) => {
+    const cell = document.createElement('div');
+    cell.className = 'review-cell';
+
+    const img = document.createElement('img');
+    img.src = page.finalCanvas.toDataURL('image/jpeg', 0.6);
+    cell.appendChild(img);
+
+    const controls = document.createElement('div');
+    controls.className = 'review-cell-controls';
+
+    const rotL = document.createElement('button');
+    rotL.textContent = '↺';
+    rotL.setAttribute('aria-label', `ページ${idx + 1}を左回転`);
+    rotL.addEventListener('click', () => {
+      page.finalCanvas = transformCanvas(page.finalCanvas, 'rotateCCW');
+      page.canvas = transformCanvas(page.canvas, 'rotateCCW');
+      renderReviewGrid();
+    });
+
+    const rot180 = document.createElement('button');
+    rot180.textContent = '↕';
+    rot180.setAttribute('aria-label', `ページ${idx + 1}を180度回転`);
+    rot180.addEventListener('click', () => {
+      page.finalCanvas = transformCanvas(page.finalCanvas, 'rotate180');
+      page.canvas = transformCanvas(page.canvas, 'rotate180');
+      renderReviewGrid();
+    });
+
+    const rotR = document.createElement('button');
+    rotR.textContent = '↻';
+    rotR.setAttribute('aria-label', `ページ${idx + 1}を右回転`);
+    rotR.addEventListener('click', () => {
+      page.finalCanvas = transformCanvas(page.finalCanvas, 'rotateCW');
+      page.canvas = transformCanvas(page.canvas, 'rotateCW');
+      renderReviewGrid();
+    });
+
+    controls.appendChild(rotL);
+    controls.appendChild(rot180);
+    controls.appendChild(rotR);
+    cell.appendChild(controls);
+    reviewGrid.appendChild(cell);
+  });
+}
+
+function showReviewStage(){
+  return new Promise((resolve) => {
+    renderReviewGrid();
+    scanWindow.classList.add('hidden');
+    reviewStage.classList.remove('hidden');
+    const handler = () => {
+      reviewStage.classList.add('hidden');
+      scanWindow.classList.remove('hidden');
+      reviewContinueBtn.removeEventListener('click', handler);
+      resolve();
+    };
+    reviewContinueBtn.addEventListener('click', handler);
+  });
+}
+
+/* ---- 用紙サイズ選択(A2/A3/A4/その他) ----
+   A2・A3・A4はどれも縦横比が同じ(1:√2)なので、選ばれたらその比率に
+   きっちりクロップする。「その他」は今の形のまま何もしない。 */
+function showPaperSizeStage(){
+  return new Promise((resolve) => {
+    scanWindow.classList.add('hidden');
+    paperChoice.classList.remove('hidden');
+    const handler = (e) => {
+      const size = e.currentTarget.dataset.size;
+      state.paperSize = size;
+      if (size !== 'other') {
+        state.pages.forEach(page => {
+          page.finalCanvas = snapToAspectRatio(page.finalCanvas, Math.SQRT2);
+        });
+      }
+      paperSizeBtns.forEach(b => b.removeEventListener('click', handler));
+      paperChoice.classList.add('hidden');
+      scanWindow.classList.remove('hidden');
+      resolve();
+    };
+    paperSizeBtns.forEach(b => b.addEventListener('click', handler));
+  });
 }
 
 downloadBtn.addEventListener('click', () => {

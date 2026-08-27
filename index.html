@@ -37,11 +37,13 @@
 
       <div class="viewfinder-controls">
         <button id="switchCamBtn" class="icon-btn" title="カメラ切替" aria-label="カメラ切替">⟲</button>
+        <button id="uploadBtn" class="icon-btn" title="写真から選択" aria-label="写真から選択">🖼</button>
         <button id="shutterBtn" class="shutter-btn" aria-label="撮影">
           <span class="shutter-inner"></span>
         </button>
         <button id="doneBtn" class="icon-btn icon-btn-accent" title="PDFを作成" aria-label="PDFを作成">✓</button>
       </div>
+      <input type="file" id="fileInput" accept="image/*" multiple style="display:none">
     </section>
 
     <!-- ===== 補正確認ビュー(撮影直後の四隅調整) ===== -->
@@ -87,16 +89,31 @@
         <button id="ocrYesBtn" class="primary-btn">OCRあり(検索可能PDF)</button>
         <button id="ocrNoBtn" class="ghost-btn">OCRなし(画像のみ・高速)</button>
       </div>
+      <div class="review-stage hidden" id="reviewStage">
+        <p class="review-title">向きを確認してください</p>
+        <p class="review-desc">おかしい向きのページがあれば、下のボタンで回転してください</p>
+        <div class="review-grid" id="reviewGrid"></div>
+        <button id="reviewContinueBtn" class="primary-btn">この向きで進める</button>
+      </div>
+      <div class="paper-choice hidden" id="paperChoice">
+        <p class="review-title">用紙サイズを選んでください</p>
+        <p class="review-desc">選んだサイズの比率にきっちり合わせてPDFを作成します(「その他」は今の形のまま)</p>
+        <div class="paper-size-grid">
+          <button class="paper-size-btn" data-size="a2">A2</button>
+          <button class="paper-size-btn" data-size="a3">A3</button>
+          <button class="paper-size-btn" data-size="a4">A4</button>
+          <button class="paper-size-btn" data-size="other">その他</button>
+        </div>
+      </div>
       <div class="scan-window hidden" id="scanWindow">
         <canvas id="processCanvas"></canvas>
         <div class="scan-line" id="scanLine"></div>
       </div>
       <ol class="stage-list hidden" id="stageList">
-        <li data-stage="orient"><span class="stage-idx">01</span><span class="stage-name">向き自動判定</span><span class="stage-state">待機</span></li>
-        <li data-stage="shadow"><span class="stage-idx">02</span><span class="stage-name">影・ムラ除去</span><span class="stage-state">待機</span></li>
-        <li data-stage="enhance"><span class="stage-idx">03</span><span class="stage-name">コントラスト調整</span><span class="stage-state">待機</span></li>
-        <li data-stage="ocr"><span class="stage-idx">04</span><span class="stage-name">文字認識(OCR)</span><span class="stage-state">待機</span></li>
-        <li data-stage="pdf"><span class="stage-idx">05</span><span class="stage-name">PDF組版</span><span class="stage-state">待機</span></li>
+        <li data-stage="shadow"><span class="stage-idx">01</span><span class="stage-name">影・ムラ除去</span><span class="stage-state">待機</span></li>
+        <li data-stage="enhance"><span class="stage-idx">02</span><span class="stage-name">コントラスト調整</span><span class="stage-state">待機</span></li>
+        <li data-stage="ocr"><span class="stage-idx">03</span><span class="stage-name">文字認識(OCR)</span><span class="stage-state">待機</span></li>
+        <li data-stage="pdf"><span class="stage-idx">04</span><span class="stage-name">PDF組版</span><span class="stage-state">待機</span></li>
       </ol>
       <button id="downloadBtn" class="primary-btn hidden">PDFをダウンロード</button>
       <button id="closeProcessBtn" class="ghost-btn hidden">閉じる</button>
