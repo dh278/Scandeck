@@ -397,10 +397,43 @@ function matToCanvas(mat){
   return outCanvas;
 }
 
+/* ---- A4/A3サイズへのスナップ補正 ----
+   輪郭検出が多少ズレても、最終的な縦横比がA4/A3(1:1.414)に近ければ
+   その比率へきっちり合わせる(はみ出した分を中央基準でクロップするだけで、
+   引き伸ばしはしない=文字が歪まない)。全く違う比率の場合はそのまま返す。 */
+function snapToStandardAspect(canvas){
+  const target = Math.SQRT2; // A4/A3の縦横比 ≒ 1.4142
+  const w = canvas.width, h = canvas.height;
+  const ratio = Math.max(w, h) / Math.min(w, h);
+  const tolerance = 0.12; // ここから±12%程度ズレていたら書類サイズと見なさない
+  if (Math.abs(ratio - target) > tolerance) return canvas;
+
+  const portrait = h >= w;
+  let targetW = w, targetH = h;
+  if (portrait) {
+    const idealH = w * target;
+    if (idealH <= h) { targetH = Math.round(idealH); }
+    else { targetW = Math.round(h / target); }
+  } else {
+    const idealW = h * target;
+    if (idealW <= w) { targetW = Math.round(idealW); }
+    else { targetH = Math.round(w / target); }
+  }
+  if (targetW === w && targetH === h) return canvas;
+
+  const offsetX = Math.floor((w - targetW) / 2);
+  const offsetY = Math.floor((h - targetH) / 2);
+  const out = document.createElement('canvas');
+  out.width = targetW; out.height = targetH;
+  out.getContext('2d').drawImage(canvas, offsetX, offsetY, targetW, targetH, 0, 0, targetW, targetH);
+  return out;
+}
+
 /* ---- 透視変換(斜め補正/指の写り込み除去) ---- */
 confirmCropBtn.addEventListener('click', () => {
   if (!state.cvReady) { updateEngineBanner(); return; }
-  const warped = warpPerspective(state.cropSrcCanvas, state.cropQuad);
+  let warped = warpPerspective(state.cropSrcCanvas, state.cropQuad);
+  warped = snapToStandardAspect(warped);
   addPage(warped);
   cropStage.classList.add('hidden');
   viewfinderSection.classList.remove('hidden');
