@@ -733,9 +733,9 @@ async function buildPDF(){
     }
 
     if (idx === 0) {
-      doc = new jsPDF({ unit: 'pt', format: [pageWpt, pageHpt] });
+      doc = new jsPDF({ unit: 'pt', format: [pageWpt, pageHpt], orientation: portrait ? 'p' : 'l' });
     } else {
-      doc.addPage([pageWpt, pageHpt]);
+      doc.addPage([pageWpt, pageHpt], portrait ? 'p' : 'l');
     }
     doc.addImage(imgData, 'JPEG', 0, 0, pageWpt, pageHpt);
 
