@@ -269,13 +269,19 @@ function defaultQuad(w, h){
    アンサンブル方式にすることで、照明条件や背景の違いに強くする。 */
 function detectQuad(srcCanvas){
   if (!state.cvReady) return null;
-  let src, small, gray;
+  let small, gray;
   try {
-    src = canvasToMat(srcCanvas);
-    const ratio = 1000 / src.cols;
-    small = new cv.Mat();
-    cv.resize(src, small, new cv.Size(Math.round(src.cols * ratio), Math.round(src.rows * ratio)));
+    // ネイティブカメラ由来の写真は12MP超になることがあり、フル解像度のまま
+    // OpenCVのMatに変換すると非常に重くなる(ボタンを押しても反応がないように
+    // 見える原因)。そのため、まず軽量なCanvas2Dで縮小してからOpenCVに渡す。
+    const targetW = 1000;
+    const scaleRatio = Math.min(1, targetW / srcCanvas.width);
+    const smallCanvas = document.createElement('canvas');
+    smallCanvas.width = Math.max(1, Math.round(srcCanvas.width * scaleRatio));
+    smallCanvas.height = Math.max(1, Math.round(srcCanvas.height * scaleRatio));
+    smallCanvas.getContext('2d').drawImage(srcCanvas, 0, 0, smallCanvas.width, smallCanvas.height);
 
+    small = canvasToMat(smallCanvas);
     gray = new cv.Mat();
     cv.cvtColor(small, gray, cv.COLOR_RGBA2GRAY);
 
@@ -305,7 +311,7 @@ function detectQuad(srcCanvas){
     const bestQuad = candidates[0].quad;
 
     // 縮小画像上の座標だったので元解像度に戻す
-    const scaleBack = (p) => ({ x: p.x / ratio, y: p.y / ratio });
+    const scaleBack = (p) => ({ x: p.x / scaleRatio, y: p.y / scaleRatio });
     return {
       tl: scaleBack(bestQuad.tl), tr: scaleBack(bestQuad.tr),
       br: scaleBack(bestQuad.br), bl: scaleBack(bestQuad.bl)
@@ -314,7 +320,7 @@ function detectQuad(srcCanvas){
     console.error('detectQuad error', e);
     return null;
   } finally {
-    [src, small, gray].forEach(m => m && m.delete());
+    [small, gray].forEach(m => m && m.delete());
   }
 }
 
@@ -412,8 +418,15 @@ function attachDrag(el, key){
   el.addEventListener('pointercancel', end);
 }
 
-autoDetectBtn.addEventListener('click', () => {
+autoDetectBtn.addEventListener('click', async () => {
+  autoDetectBtn.disabled = true;
+  autoDetectBtn.textContent = '検出中…';
+  // 一度描画を挟んでからでないと、重い処理中はボタンの表示が変わらず
+  // 「反応していない」ように見えてしまう
+  await new Promise((resolve) => setTimeout(resolve, 30));
   const q = detectQuad(state.cropSrcCanvas);
+  autoDetectBtn.disabled = false;
+  autoDetectBtn.textContent = '自動検出';
   if (q) { state.cropQuad = q; updateCropSvg(); }
   else { setStatus('自動検出できませんでした。手動で調整してください', 'warn'); }
 });
