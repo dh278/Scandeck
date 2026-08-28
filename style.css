@@ -171,35 +171,32 @@ button{ font-family: var(--font-jp); }
   flex-direction:column;
   gap:12px;
 }
-.crop-toolbar{
-  display:flex;
-  gap:8px;
-  justify-content:center;
-}
-.tool-btn{
-  width:44px; height:44px;
-  border-radius:50%;
-  border:1px solid #3A3F37;
-  background: var(--deck-raise);
-  color: var(--paper);
-  font-size:18px;
-  cursor:pointer;
-}
-.tool-btn:active{ background:#2B2F29; }
-
 .crop-wrap{
   position:relative;
   width:100%;
-  background:#000;
+  /* ハンドルが画面端に張り付いてつかみにくくならないよう、
+     周囲に余白を確保してその中に画像を収める */
+  padding: 26px;
+  background: var(--deck-raise);
   border-radius: var(--radius);
-  overflow:hidden;
+  box-sizing: border-box;
 }
-.crop-wrap canvas, .crop-wrap svg{
+.crop-inner{
+  position:relative;
+  width:100%;
+  background:#000;
+  border-radius: 2px;
+  overflow:visible;
+}
+.crop-inner canvas{
   width:100%; height:auto; display:block;
+  border-radius: 2px;
 }
 #cropSvg{
   position:absolute; inset:0;
+  width:100%; height:100%;
   touch-action:none;
+  overflow:visible;
 }
 .crop-hint{
   margin:0;

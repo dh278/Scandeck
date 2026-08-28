@@ -37,9 +37,6 @@ const cropSvg         = $('cropSvg');
 const retakeBtn       = $('retakeBtn');
 const autoDetectBtn   = $('autoDetectBtn');
 const confirmCropBtn  = $('confirmCropBtn');
-const rotateCcwBtn    = $('rotateCcwBtn');
-const rotateCwBtn     = $('rotateCwBtn');
-const flipHBtn        = $('flipHBtn');
 const filmstrip       = $('filmstrip');
 const filmstripEmpty  = $('filmstripEmpty');
 const pageCount       = $('pageCount');
@@ -324,14 +321,30 @@ function detectQuad(srcCanvas){
   }
 }
 
-// 二値化/エッジ画像から、有効な(凸な4点で一定以上の面積を持つ)四角形候補を集める
+// 二値化/エッジ画像から、有効な四角形候補を集める。
+// 主に「凸な4点への近似」を試すが、それが上手くいかない書類(角が丸い/
+// ぼやけている等)向けに、一番大きい輪郭の最小外接矩形(minAreaRect)も
+// 予備候補として加える。
 function collectQuadCandidates(binaryMat, refMat, candidates){
   const contours = new cv.MatVector();
   const hierarchy = new cv.Mat();
   cv.findContours(binaryMat, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
   const imgArea = refMat.cols * refMat.rows;
+
+  let largestContour = null;
+  let largestArea = 0;
+
   for (let i = 0; i < contours.size(); i++) {
     const cnt = contours.get(i);
+    const rawArea = Math.abs(cv.contourArea(cnt));
+    if (rawArea > largestArea) {
+      if (largestContour) largestContour.delete();
+      largestArea = rawArea;
+      largestContour = cnt;
+    } else {
+      // 保持しない輪郭はここで解放(largestContourは後でまとめて解放)
+    }
+
     const peri = cv.arcLength(cnt, true);
     const approx = new cv.Mat();
     cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
@@ -346,10 +359,36 @@ function collectQuadCandidates(binaryMat, refMat, candidates){
       }
     }
     approx.delete();
-    cnt.delete();
+    if (cnt !== largestContour) cnt.delete();
   }
+
+  // 予備候補: 一番大きい輪郭を、4点への近似に関係なく矩形化して追加
+  if (largestContour && largestArea > imgArea * 0.15) {
+    try {
+      const rotated = cv.minAreaRect(largestContour);
+      candidates.push({ area: largestArea * 0.9, quad: rotatedRectToQuad(rotated) });
+    } catch (e) {
+      console.error('minAreaRect error', e);
+    }
+  }
+  if (largestContour) largestContour.delete();
+
   contours.delete();
   hierarchy.delete();
+}
+
+function rotatedRectToQuad(rect){
+  const { center, size, angle } = rect;
+  const rad = angle * Math.PI / 180;
+  const cos = Math.cos(rad), sin = Math.sin(rad);
+  const w2 = size.width / 2, h2 = size.height / 2;
+  const corners = [
+    { x: -w2, y: -h2 }, { x: w2, y: -h2 }, { x: w2, y: h2 }, { x: -w2, y: h2 }
+  ].map(p => ({
+    x: center.x + p.x * cos - p.y * sin,
+    y: center.y + p.x * sin + p.y * cos
+  }));
+  return orderQuad(corners);
 }
 
 function orderQuad(pts){
@@ -374,15 +413,27 @@ function renderCropHandles(scale){
   cropSvg.appendChild(poly);
 
   ['tl', 'tr', 'br', 'bl'].forEach(key => {
-    const c = document.createElementNS(ns, 'circle');
-    c.setAttribute('r', '14');
-    c.setAttribute('fill', '#E85A4F');
-    c.setAttribute('stroke', '#fff');
-    c.setAttribute('stroke-width', '2');
-    c.dataset.corner = key;
-    c.style.cursor = 'grab';
-    cropSvg.appendChild(c);
-    attachDrag(c, key);
+    const group = document.createElementNS(ns, 'g');
+    group.dataset.corner = key;
+
+    // 見た目のサイズより大きい透明な当たり判定(指で掴みやすくするため)
+    const hit = document.createElementNS(ns, 'circle');
+    hit.setAttribute('r', '30');
+    hit.setAttribute('fill', 'transparent');
+    hit.style.cursor = 'grab';
+    hit.style.touchAction = 'none';
+    group.appendChild(hit);
+
+    const visible = document.createElementNS(ns, 'circle');
+    visible.setAttribute('r', '16');
+    visible.setAttribute('fill', '#E85A4F');
+    visible.setAttribute('stroke', '#fff');
+    visible.setAttribute('stroke-width', '3');
+    visible.style.pointerEvents = 'none';
+    group.appendChild(visible);
+
+    cropSvg.appendChild(group);
+    attachDrag(hit, key, group);
   });
   updateCropSvg();
 }
@@ -392,9 +443,11 @@ function updateCropSvg(){
   const pts = [q.tl, q.tr, q.br, q.bl].map(p => `${p.x * s},${p.y * s}`).join(' ');
   cropSvg.querySelector('#cropPoly').setAttribute('points', pts);
   ['tl', 'tr', 'br', 'bl'].forEach(key => {
-    const c = cropSvg.querySelector(`circle[data-corner="${key}"]`);
-    c.setAttribute('cx', q[key].x * s);
-    c.setAttribute('cy', q[key].y * s);
+    const group = cropSvg.querySelector(`g[data-corner="${key}"]`);
+    group.querySelectorAll('circle').forEach(c => {
+      c.setAttribute('cx', q[key].x * s);
+      c.setAttribute('cy', q[key].y * s);
+    });
   });
 }
 
@@ -462,14 +515,6 @@ function transformCanvas(srcCanvas, type){
   }
   return c;
 }
-
-function applyTransform(type){
-  state.cropSrcCanvas = transformCanvas(state.cropSrcCanvas, type);
-  openCropStage(state.cropSrcCanvas);
-}
-rotateCcwBtn.addEventListener('click', () => applyTransform('rotateCCW'));
-rotateCwBtn.addEventListener('click', () => applyTransform('rotateCW'));
-flipHBtn.addEventListener('click', () => applyTransform('flipH'));
 
 /* ---- canvas → OpenCV Mat 変換(cv.imreadを使わない自前実装) ---- */
 function canvasToMat(canvas){

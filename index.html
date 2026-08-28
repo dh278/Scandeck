@@ -49,14 +49,11 @@
 
     <!-- ===== 補正確認ビュー(撮影直後の四隅調整) ===== -->
     <section class="crop-stage hidden" id="cropStage">
-      <div class="crop-toolbar">
-        <button id="rotateCcwBtn" class="tool-btn" title="左に90度回転" aria-label="左に90度回転">↺</button>
-        <button id="rotateCwBtn" class="tool-btn" title="右に90度回転" aria-label="右に90度回転">↻</button>
-        <button id="flipHBtn" class="tool-btn" title="左右反転(文字が鏡文字の場合)" aria-label="左右反転">⇋</button>
-      </div>
       <div class="crop-wrap">
-        <canvas id="cropCanvas"></canvas>
-        <svg id="cropSvg"></svg>
+        <div class="crop-inner">
+          <canvas id="cropCanvas"></canvas>
+          <svg id="cropSvg"></svg>
+        </div>
       </div>
       <p class="crop-hint">四隅のハンドルをドラッグして書類の枠に合わせてください</p>
       <p class="engine-banner hidden" id="engineBanner">画像処理エンジンを読み込み中… 通信状況によっては数十秒かかります</p>
