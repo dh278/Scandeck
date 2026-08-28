@@ -28,6 +28,7 @@ const shutterBtn      = $('shutterBtn');
 const switchCamBtn    = $('switchCamBtn');
 const uploadBtn       = $('uploadBtn');
 const fileInput       = $('fileInput');
+const nativeCaptureInput = $('nativeCaptureInput');
 const doneBtn         = $('doneBtn');
 const cropStage       = $('cropStage');
 const viewfinderSection = $('viewfinderSection');
@@ -157,35 +158,29 @@ window.addEventListener('load', () => {
    撮影 → 四隅調整ステージ
    ============================================================ */
 /* ---- 端末の向き(縦/横)を取得する ---- */
-function getOrientationAngle(){
-  if (screen.orientation && typeof screen.orientation.angle === 'number') {
-    return screen.orientation.angle; // 0, 90, 180, 270
-  }
-  if (typeof window.orientation === 'number') {
-    return ((window.orientation % 360) + 360) % 360;
-  }
-  return 0;
-}
 
 shutterBtn.addEventListener('click', () => {
-  const vw = video.videoWidth, vh = video.videoHeight;
-  if (!vw) return;
-  const raw = document.createElement('canvas');
-  raw.width = vw; raw.height = vh;
-  raw.getContext('2d').drawImage(video, 0, 0, vw, vh);
+  // iOS Safariは高解像度スチル撮影用のImageCapture APIに非対応なため、
+  // 動画プレビューから切り出す方式だと解像度が足りず(特にA3など大きい書類で)
+  // 文字が潰れてしまう。そこでシャッターは端末純正カメラアプリを呼び出し、
+  // OSのフル解像度(12MP以上)で撮影する方式にしている。
+  nativeCaptureInput.setAttribute('capture', state.facingMode === 'user' ? 'user' : 'environment');
+  nativeCaptureInput.click();
+});
 
-  // スマホを横向きにして撮影した場合、読みやすい向きに自動回転する
-  const angle = getOrientationAngle();
-  let c = raw;
-  if (angle === 90) {
-    c = transformCanvas(raw, 'rotateCW');
-  } else if (angle === 270) {
-    c = transformCanvas(raw, 'rotateCCW');
+nativeCaptureInput.addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  nativeCaptureInput.value = '';
+  if (!file) return;
+  try {
+    const raw = await fileToCanvas(file);
+    state.cropSrcCanvas = raw;
+    retakeBtn.textContent = '撮り直す';
+    openCropStage(raw);
+  } catch (err) {
+    console.error(err);
+    setStatus('撮影した写真を読み込めませんでした', 'warn');
   }
-
-  state.cropSrcCanvas = c;
-  retakeBtn.textContent = '撮り直す';
-  openCropStage(c);
 });
 
 /* ============================================================
