@@ -294,6 +294,17 @@ function detectQuad(srcCanvas){
       cv.dilate(edges, edges, kernel);
       kernel.delete();
       collectQuadCandidates(edges, small, candidates);
+
+      // 予備候補: 閉じた輪郭にならなくても、上下左右それぞれの
+      // 境界「線」さえ検出できれば、その交点から四隅を推定する
+      const lineQuad = detectQuadViaLines(edges, small);
+      if (lineQuad) {
+        const area = quadArea(lineQuad);
+        if (area > small.cols * small.rows * 0.15) {
+          candidates.push({ area: area * 0.85, quad: lineQuad });
+        }
+      }
+
       blurred.delete(); edges.delete();
     });
 
@@ -389,6 +400,72 @@ function rotatedRectToQuad(rect){
     y: center.y + p.x * sin + p.y * cos
   }));
   return orderQuad(corners);
+}
+
+// シューレースの公式で四角形の面積を求める
+function quadArea(q){
+  const pts = [q.tl, q.tr, q.br, q.bl];
+  let area = 0;
+  for (let i = 0; i < 4; i++) {
+    const p1 = pts[i], p2 = pts[(i + 1) % 4];
+    area += p1.x * p2.y - p2.x * p1.y;
+  }
+  return Math.abs(area / 2);
+}
+
+// 二直線(2点表現)の交点を求める
+function lineIntersect(l1, l2){
+  const A1 = l1.y2 - l1.y1, B1 = l1.x1 - l1.x2, C1 = A1 * l1.x1 + B1 * l1.y1;
+  const A2 = l2.y2 - l2.y1, B2 = l2.x1 - l2.x2, C2 = A2 * l2.x1 + B2 * l2.y1;
+  const det = A1 * B2 - A2 * B1;
+  if (Math.abs(det) < 1e-6) return null;
+  return { x: (B2 * C1 - B1 * C2) / det, y: (A1 * C2 - A2 * C1) / det };
+}
+
+/* ---- 直線検出(Hough変換)による四隅の推定 ----
+   書類の端が写真のフチにかかっている等の理由で「閉じた輪郭」として
+   検出できない場合でも、上下左右それぞれの境界が直線として検出できれば
+   それらの交点から四隅を割り出せる。輪郭ベースの方式を補完する。 */
+function detectQuadViaLines(edges, refMat){
+  let lines;
+  try {
+    lines = new cv.Mat();
+    cv.HoughLinesP(edges, lines, 1, Math.PI / 180, 60, refMat.cols * 0.25, 20);
+    if (lines.rows < 4) return null;
+
+    const horiz = [], vert = [];
+    for (let i = 0; i < lines.rows; i++) {
+      const x1 = lines.data32S[i * 4], y1 = lines.data32S[i * 4 + 1];
+      const x2 = lines.data32S[i * 4 + 2], y2 = lines.data32S[i * 4 + 3];
+      const angle = Math.abs(Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI);
+      const line = { x1, y1, x2, y2 };
+      if (angle < 20 || angle > 160) { line.y = (y1 + y2) / 2; horiz.push(line); }
+      else if (angle > 70 && angle < 110) { line.x = (x1 + x2) / 2; vert.push(line); }
+    }
+    if (horiz.length < 2 || vert.length < 2) return null;
+
+    horiz.sort((a, b) => a.y - b.y);
+    vert.sort((a, b) => a.x - b.x);
+    const top = horiz[0], bottom = horiz[horiz.length - 1];
+    const left = vert[0], right = vert[vert.length - 1];
+
+    const tl = lineIntersect(top, left), tr = lineIntersect(top, right);
+    const br = lineIntersect(bottom, right), bl = lineIntersect(bottom, left);
+    if (!tl || !tr || !br || !bl) return null;
+
+    // 交点が画像の範囲から大きく外れていたら不採用
+    const w = refMat.cols, h = refMat.rows;
+    const inRange = (p) => p.x > -w * 0.2 && p.x < w * 1.2 && p.y > -h * 0.2 && p.y < h * 1.2;
+    if (![tl, tr, br, bl].every(inRange)) return null;
+
+    const clamp = (p) => ({ x: Math.max(0, Math.min(w, p.x)), y: Math.max(0, Math.min(h, p.y)) });
+    return orderQuad([tl, tr, br, bl].map(clamp));
+  } catch (e) {
+    console.error('detectQuadViaLines error', e);
+    return null;
+  } finally {
+    if (lines) lines.delete();
+  }
 }
 
 function orderQuad(pts){
